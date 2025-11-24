@@ -12,6 +12,7 @@ ENV VLLM_BASE_DIR=/workspace/vllm
 # 1. Install System Dependencies
 # Added 'git', 'wget', and 'python3-pip' as they are required for the script steps
 RUN apt-get update && apt-get install -y \
+    curl \
     cmake \
     build-essential \
     ninja-build \
@@ -36,8 +37,11 @@ ENV TORCH_CUDA_ARCH_LIST=12.1a
 ENV TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas
 ENV TIKTOKEN_ENCODINGS_BASE=$VLLM_BASE_DIR/tiktoken_encodings
 
+# --- CACHE BUSTER ---
+# Change this argument to force a re-download of PyTorch/FlashInfer
+ARG CACHEBUST_DEPS=1
+
 # 4. Install Python Dependencies (Using pip instead of uv)
-#RUN python3 -m pip install --upgrade pip
 
 # Install PyTorch for CUDA 13.0
 RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu130
@@ -54,6 +58,11 @@ RUN pip install flashinfer-python --no-deps --index-url https://flashinfer.ai/wh
 # Install fast safetensors to improve loading speeds
 RUN pip install fastsafetensors>=0.1.10
 
+# --- VLLM SOURCE CACHE BUSTER ---
+# Change THIS argument to force a fresh git clone and rebuild of vLLM
+# without re-installing the dependencies above.
+ARG CACHEBUST_VLLM=1
+
 # 5. Clone and Build vLLM
 RUN git clone --recursive https://github.com/vllm-project/vllm.git
 WORKDIR $VLLM_BASE_DIR/vllm
@@ -62,6 +71,9 @@ WORKDIR $VLLM_BASE_DIR/vllm
 RUN python3 use_existing_torch.py && \
     sed -i "/flashinfer/d" requirements/cuda.txt && \
     pip install -r requirements/build.txt
+
+# TEMPORARY - apply NVFP4 patch
+RUN curl -L https://patch-diff.githubusercontent.com/raw/vllm-project/vllm/pull/29242.diff | git apply
 
 # Final Build
 # Uses --no-build-isolation to respect the pre-installed Torch/FlashInfer
@@ -73,4 +85,4 @@ WORKDIR $VLLM_BASE_DIR
 
 # Copy clustering script
 COPY run-cluster-node.sh $VLLM_BASE_DIR/
-
+RUN chmod +x $VLLM_BASE_DIR/run-cluster-node.sh
