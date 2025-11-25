@@ -63,7 +63,7 @@ Or if you want to start the cluster node (head or regular), you can launch with 
 
 ```bash
 docker run --privileged --gpus all -it --rm \
-  --ipc=host --shm-size 10.24g \
+  --ipc=host \
   --network host \
   --name vllm_node \
   -v ~/.cache/huggingface:/root/.cache/huggingface \
@@ -78,7 +78,7 @@ docker run --privileged --gpus all -it --rm \
 
 ```bash
 docker run --privileged --gpus all -it --rm \
-  --ipc=host --shm-size 10.24g \
+  --ipc=host \
   --network host \
   --name vllm_node \
   -v ~/.cache/huggingface:/root/.cache/huggingface \
@@ -101,7 +101,9 @@ docker run --privileged --gpus all -it --rm \
 
 ## 3\. Using `run-cluster-node.sh`
 
-Once inside the container, use the included script to configure the environment and launch Ray.
+The script is used to configure the environment and launch Ray either in head or node mode.
+
+Normally you would start it with the container like in the example above, but you can launch it inside the Docker session manually if needed (but make sure it's not already running).
 
 ### Syntax
 
@@ -117,7 +119,7 @@ Once inside the container, use the included script to configure the environment 
 | `-i` | `--ib-if` | InfiniBand interface name (e.g., `ib0`, `rocep1s0f1`). | **Yes** |
 | `-m` | `--head-ip` | The IP address of the **Head Node**. | Only if role is `node` |
 
-### Example: Starting the Head Node
+### Example: Starting inside the Head Node
 
 ```bash
 ./run-cluster-node.sh \
@@ -127,7 +129,7 @@ Once inside the container, use the included script to configure the environment 
   --ib-if rocep1s0f1
 ```
 
-### Example: Starting a Worker Node
+### Example: Starting inside a Worker Node
 
 ```bash
 ./run-cluster-node.sh \
@@ -151,6 +153,24 @@ docker exec -it vllm_node bash
 ```
 
 All environment variables (NCCL, Ray, vLLM config) set by the startup script will be loaded automatically in this new session.
+
+## 5.\. Using cluster mode for inference
+
+First, start follow the instructions above to start the head container on your first Spark, and node container on the second Spark.
+Then, on the first Spark, run vllm like this:
+
+```bash
+docker exec -it vllm_node bash -i -c "vllm serve RedHatAI/Qwen3-VL-235B-A22B-Instruct-NVFP4 --port 8888 --host 0.0.0.0 --gpu-memory-utilization 0.7 -tp 2 --distributed-executor-backend ray --max-model-len 32768"
+```
+
+Alternatively, run an interactive shell first:
+
+```bash
+docker exec -it vllm_node
+```
+
+And execute vllm command inside.
+
 
 ### Hardware Architecture
 
