@@ -22,6 +22,7 @@ COMMAND_TO_RUN=""
 DAEMON_MODE="false"
 CHECK_CONFIG="false"
 ACTION="start"
+CLUSTER_WAS_RUNNING="false"
 
 # Function to print usage
 usage() {
@@ -275,6 +276,11 @@ cleanup() {
     # Remove traps to prevent nested cleanup
     trap - EXIT INT TERM HUP
 
+    if [[ "$CLUSTER_WAS_RUNNING" == "true" ]]; then
+        echo "Cluster was already running when script started. Skipping cleanup."
+        return
+    fi
+
     echo ""
     echo "Stopping cluster..."
     
@@ -347,14 +353,19 @@ check_cluster_running() {
     done
     
     if [[ "$running" == "true" ]]; then
-        echo "Cluster containers are already running. Please stop them first or use a different name."
-        exit 1
+        echo "Cluster containers are already running. Skipping launch."
+        CLUSTER_WAS_RUNNING="true"
+        return 0
     fi
 }
 
 # Start Cluster Function
 start_cluster() {
     check_cluster_running
+
+    if [[ "$CLUSTER_WAS_RUNNING" == "true" ]]; then
+        return
+    fi
 
     # Start Head Node
     echo "Starting Head Node on $HEAD_IP..."
