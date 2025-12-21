@@ -193,6 +193,24 @@ Using a provided build script is recommended, but if you want to build using `do
 | `TRITON_REF` | `v3.5.1` | Triton commit SHA, branch, or tag to build. |
 | `VLLM_REF` | `main` | vLLM commit SHA, branch, or tag to build. |
 | `BUILD_JOBS` | `16` | Number of parallel build jobs (default: 16). |
+| `FLASHINFER_PRE` | `""` | Set to `--pre` to use pre-release versions of FlashInfer. |
+
+### Building Manually using Wheels
+
+If you prefer to use pre-built wheels (faster build, smaller image), you can use `Dockerfile.wheels`.
+
+```bash
+docker build -f Dockerfile.wheels -t vllm-node .
+```
+
+Supported build arguments for `Dockerfile.wheels`:
+
+| Argument | Default | Description |
+| :--- | :--- | :--- |
+| `BUILD_JOBS` | `16` | Number of parallel build jobs (default: 16). |
+| `CACHEBUST_VLLM` | `1` | Change this to force a re-download of vLLM wheels. |
+| `WHEELS_FROM_GITHUB_RELEASE` | `0` | Set to `1` to use GitHub release wheels instead of nightly wheels. |
+| `FLASHINFER_PRE` | `""` | Set to `--pre` to use pre-release versions of FlashInfer. |
 
 ### Using the Build Script (Recommended)
 
