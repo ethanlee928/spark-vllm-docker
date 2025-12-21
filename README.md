@@ -1,7 +1,9 @@
 
-# vLLM Ray Cluster Node Docker for DGX Spark
+# vLLM Docker Optimized for DGX Spark (single or multi-node)
 
 This repository contains the Docker configuration and startup scripts to run a multi-node vLLM inference cluster using Ray. It supports InfiniBand/RDMA (NCCL) and custom environment configuration for high-performance setups.
+
+While it was primarily developed to support multi-node inference, it works just as well on a single node setups.
 
 ## Table of Contents
 
@@ -20,7 +22,7 @@ This repository contains the Docker configuration and startup scripts to run a m
 
 This repository is not affiliated with NVIDIA or their subsidiaries. This is a community effort aimed to help DGX Spark users to set up and run the most recent versions of vLLM on Spark cluster or single nodes. 
 
-The Dockerfile builds from the main branch of VLLM, so depending on when you run the build process, it may not be in fully functioning state. You can target a specific vLLM release by setting `--vllm-ref` parameter.
+The Dockerfile builds from the main branch of VLLM, so depending on when you run the build process, it may not be in fully functioning state. You can target a specific vLLM release by setting `--vllm-ref` parameter or use `--use-wheels release` to install pre-built release wheels.
 
 ## CHANGELOG
 
@@ -44,6 +46,11 @@ Don't do it every time you rebuild, because it will slow down compilation times.
 
 For periodic maintenance, I recommend using a filter: `docker builder prune --filter until=72h`
 
+### 2025-12-21
+
+Pre-built wheels now support release versions. Use with `--use-wheels release`.
+Using nightly wheels or building from source is recommended for better performance.
+
 ### 2025-12-20
 
 - Limited ccache to 50G when building from source to reduce build cache size.
@@ -52,7 +59,7 @@ For periodic maintenance, I recommend using a filter: `docker builder prune --fi
   - Allows building the container using pre-built vLLM wheels instead of compiling from source.
   - Reduced build time and container size.
   - `mode` is optional and defaults to `nightly`.
-  - Supported modes: `nightly` (release wheels are broken with CUDA 13 currently).
+  - Supported modes: `nightly` (release wheels are broken with CUDA 13 currently). UPDATE: `release` also works now.
 ### 2025-12-19
 
 Updated `build-and-copy.sh` to support copying to multiple hosts (thanks @ericlewis for the contribution).

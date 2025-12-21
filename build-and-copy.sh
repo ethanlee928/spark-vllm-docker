@@ -155,11 +155,7 @@ if [ "$NO_BUILD" = false ]; then
         echo "Using pre-built vLLM wheels (mode: $USE_WHEELS_MODE)"
         CMD+=("-f" "Dockerfile.wheels")
         if [ "$USE_WHEELS_MODE" = "release" ]; then
-             echo "Release wheels are currently broken with CUDA 13, use nightly instead."
-             exit 1
-             CMD+=("--build-arg" "VLLM_WHEELS_URL=https://wheels.vllm.ai/cu130")
-        else
-             CMD+=("--build-arg" "VLLM_WHEELS_URL=https://wheels.vllm.ai/nightly/cu130")
+             CMD+=("--build-arg" "WHEELS_FROM_GITHUB_RELEASE=1")
         fi
     else
         echo "Building vLLM from source"
