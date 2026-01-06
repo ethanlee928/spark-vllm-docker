@@ -17,7 +17,7 @@ TMP_IMAGE=""
 PARALLEL_COPY=false
 USE_WHEELS_MODE=""
 PRE_FLASHINFER=false
-PRE_TRANSFORMERS=false
+PRE_TRANSFORMERS=true
 
 cleanup() {
     if [ -n "$TMP_IMAGE" ] && [ -f "$TMP_IMAGE" ]; then
