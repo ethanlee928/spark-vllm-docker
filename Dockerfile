@@ -213,6 +213,7 @@ RUN apt update && apt upgrade -y \
     python3 python3-pip python3-dev vim curl git wget \
     libcudnn9-cuda-13 \
     libnccl-dev libnccl2 libibverbs1 libibverbs-dev rdma-core \
+    libxcb1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Set final working directory
