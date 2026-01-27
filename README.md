@@ -127,6 +127,68 @@ Don't do it every time you rebuild, because it will slow down compilation times.
 
 For periodic maintenance, I recommend using a filter: `docker builder prune --filter until=72h`
 
+### 2026-01-26
+
+Added an experimental build option, optimized for DGX Spark and gpt-oss models by [Christopher Owen](https://github.com/christopherowen/spark-vllm-mxfp4-docker/blob/main/Dockerfile).
+
+It is currently the fastest way to run GPT-OSS on DGX Spark, achieving 60 t/s on a single Spark. It's currently not working in a cluster configuration.
+
+To use this build, first build the container with `--exp-mxfp4` flag. I recommend using a separate label as it is currently not recommended to use this build for models other than gpt-oss:
+
+```bash
+./build-and-copy.sh -t vllm-node-mxfp4 --exp-mxfp4 -c
+```
+
+Then, to run on a single Spark:
+
+```bash
+ docker run \
+  --privileged \
+  --gpus all \
+  -it --rm \
+  --network host --ipc=host \
+  -v  ~/.cache/huggingface:/root/.cache/huggingface \
+  vllm-node-mxfp4 \
+  bash -c -i "vllm serve openai/gpt-oss-120b \
+        --host 0.0.0.0 \
+        --port 8888 \
+        --enable-auto-tool-choice \
+        --tool-call-parser openai \
+        --reasoning-parser openai_gptoss \
+        --gpu-memory-utilization 0.70 \
+        --enable-prefix-caching \
+        --load-format fastsafetensors \
+        --quantization mxfp4 \
+        --mxfp4-backend CUTLASS \
+        --mxfp4-layers moe,qkv,o,lm_head \
+        --attention-backend FLASHINFER \
+        --kv-cache-dtype fp8 \
+        --max-num-batched-tokens 8192"
+```
+
+On a Dual Spark cluster (**CURRENTLY NOT WORKING**):
+
+```bash
+./launch-cluster.sh -t vllm-node-mxfp4 exec vllm serve \
+  openai/gpt-oss-120b \
+        --host 0.0.0.0 \
+        --port 8888 \
+        --enable-auto-tool-choice \
+        --tool-call-parser openai \
+        --reasoning-parser openai_gptoss \
+        --gpu-memory-utilization 0.70 \
+        --enable-prefix-caching \
+        --load-format fastsafetensors \
+        --quantization mxfp4 \
+        --mxfp4-backend CUTLASS \
+        --mxfp4-layers moe,qkv,o,lm_head \
+        --attention-backend FLASHINFER \
+        --kv-cache-dtype fp8 \
+        --max-num-batched-tokens 8192 \
+        --distributed-executor-backend ray \
+        --tensor-parallel-size 2
+```
+
 ### 2025-12-24
 
 - Added `hf-download.sh` script to download models from HuggingFace using `uvx` and optionally copy them to other cluster nodes.
@@ -353,6 +415,7 @@ Using a different username:
 | `--triton-ref <ref>` | Triton commit SHA, branch or tag (default: 'v3.5.1') |
 | `--vllm-ref <ref>` | vLLM commit SHA, branch or tag (default: 'main') |
 | `--pre-tf` | Install pre-release transformers (5.0.0rc or higher). Alias: `--pre-transformers`. |
+| `--exp-mxfp4` | Build with experimental native MXFP4 support. Alias: `--experimental-mxfp4`. |
 | `--use-wheels [mode]` | Use pre-built vLLM wheels. Mode: `nightly` (default) or `release`. |
 | `--pre-flashinfer` | Use pre-release versions of FlashInfer. |
 | `-c, --copy-to <host[,host...] or host host...>` | Host(s) to copy the image to after building (space- or comma-separated list after the flag). |
