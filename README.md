@@ -40,6 +40,23 @@ cd spark-vllm-docker
 
 Build the container.
 
+**ATTENTION!** 
+
+If you are getting the following error (or similar), you need to build the image from the source instead of using pre-built wheels. To do it, just remove `--use-wheels` parameter from the build command:
+
+```
+0.181 Using Python 3.12.3 environment at: /usr
+0.559   × No solution found when resolving dependencies:
+0.559   ╰─▶ Because only vllm==0.15.0rc2.dev49+g59bcc5b6f.cu130 is available and
+0.559       vllm==0.15.0rc2.dev49+g59bcc5b6f.cu130 has no wheels with a matching
+0.559       platform tag (e.g., `manylinux_2_39_aarch64`), we can conclude that all
+0.559       versions of vllm cannot be used.
+0.559       And because you require vllm, we can conclude that your requirements
+0.559       are unsatisfiable.
+```
+
+This error happens if vLLM nightly build fails for aarch64 platform, but succeeds for x86-64. You can check the status of vLLM nightly wheels at https://wheels.vllm.ai/nightly/cu130/vllm/
+
 **If you have only one DGX Spark:**
 
 ```bash
