@@ -36,8 +36,8 @@ ENV PIP_BREAK_SYSTEM_PACKAGES=1
 # Set pip cache directory
 ENV PIP_CACHE_DIR=/root/.cache/pip
 ENV UV_CACHE_DIR=/root/.cache/uv
-ENV UV_SYSTEM_PYTHON=1
-ENV UV_BREAK_SYSTEM_PACKAGES=1
+#ENV UV_SYSTEM_PYTHON=1
+#ENV UV_BREAK_SYSTEM_PACKAGES=1
 ENV UV_LINK_MODE=copy
 
 # Set the base directory environment variable
@@ -77,6 +77,11 @@ ENV TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas
 # Change this argument to force a re-download of PyTorch/FlashInfer
 ARG CACHEBUST_DEPS=1
 
+# Initialize virtual environment
+ENV VIRTUAL_ENV=/workspace/python-venv
+RUN uv venv /workspace/python-venv
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
 # 3. Install Python Dependencies with Cache Mounts
 # Using --mount=type=cache ensures that even if this layer invalidates, 
 # pip reuses previously downloaded wheels.
@@ -86,7 +91,7 @@ RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
 
 # Install additional dependencies
 RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
-    uv pip install xgrammar fastsafetensors triton
+    uv pip install fastsafetensors
 
 ARG PRE_TRANSFORMERS=0
 RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
@@ -94,9 +99,9 @@ RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
         uv pip install -U transformers --pre; \
     fi
 # =========================================================
-# STAGE 2: Flashinfer Builder
+# STAGE 2: Builder
 # =========================================================
-FROM base AS flashinfer-builder
+FROM base AS builder
 
 ENV FLASHINFER_CUDA_ARCH_LIST="12.1f"
 
@@ -108,8 +113,8 @@ ARG CUTLASS_REPO=https://github.com/christopherowen/cutlass.git
 ARG FLASHINFER_SHA=f349e52496a72a00d8c4ac02c7a1e38523ff7194
 ARG CUTLASS_SHA=11af7f02ab52c9130e422eeb4b44042fbd60c083
 
-RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
-    uv pip install "apache-tvm-ffi<0.2" nvidia-ml-py requests
+# RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
+#     uv pip install "apache-tvm-ffi<0.2" nvidia-ml-py requests wheel
 
 # Clone FlashInfer (cached for faster rebuilds)
 RUN --mount=type=cache,id=git-flashinfer,target=/git-cache/flashinfer \
@@ -154,23 +159,18 @@ WORKDIR /workspace/flashinfer
 RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     --mount=type=cache,id=ccache,target=/root/.ccache \
     sed -i -e 's/license = "Apache-2.0"/license = { text = "Apache-2.0" }/' -e '/license-files/d' pyproject.toml && \
-    uv build --no-build-isolation --wheel --out-dir=./wheels .
+    uv pip install --no-build-isolation . -v
 
 # flashinfer-cubin
-RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
-    --mount=type=cache,id=ccache,target=/root/.ccache \
-    cd flashinfer-cubin && uv build --no-build-isolation --wheel --out-dir=../wheels .
+# RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
+#     --mount=type=cache,id=ccache,target=/root/.ccache \
+#     cd flashinfer-cubin && uv pip install --no-build-isolation . -v
 
-# flashinfer-jit-cache
-RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
-    --mount=type=cache,id=ccache,target=/root/.ccache \
-    cd flashinfer-jit-cache && \
-    uv build --no-build-isolation --wheel --out-dir=../wheels .
-
-# =========================================================
-# STAGE 3: vLLM Builder (Builds vLLM from Source)
-# =========================================================
-FROM base AS builder
+# # flashinfer-jit-cache
+# RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
+#     --mount=type=cache,id=ccache,target=/root/.ccache \
+#     cd flashinfer-jit-cache && \
+#     uv pip install --no-build-isolation . -v
 
 # --- VLLM SOURCE CACHE BUSTER ---
 # Change THIS argument to force a fresh git clone and rebuild of vLLM
@@ -216,7 +216,6 @@ ARG PRE_TRANSFORMERS=0
 RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     python3 use_existing_torch.py && \
     sed -i "/flashinfer/d" requirements/cuda.txt && \
-    sed -i '/^triton\b/d' requirements/test.txt && \
     sed -i '/^fastsafetensors\b/d' requirements/test.txt && \
     if [ "$PRE_TRANSFORMERS" = "1" ]; then \
         sed -i '/^transformers\b/d' requirements/common.txt; \
@@ -236,12 +235,6 @@ RUN --mount=type=cache,id=ccache,target=/root/.ccache \
     --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     uv pip install --no-build-isolation . -v
 
-# Install custom Flashinfer from flashinfer-builder
-COPY --from=flashinfer-builder /workspace/flashinfer/wheels /workspace/wheels
-RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
-    uv pip install --no-deps /workspace/wheels/*.whl && \
-    uv pip install apache-tvm-ffi nvidia-cudnn-frontend nvidia-cutlass-dsl nvidia-ml-py tabulate
-
 # =========================================================
 # STAGE 4: Runner (Transfers only necessary artifacts)
 # =========================================================
@@ -254,8 +247,8 @@ ENV VLLM_BASE_DIR=/workspace/vllm
 # Set pip cache directory
 ENV PIP_CACHE_DIR=/root/.cache/pip
 ENV UV_CACHE_DIR=/root/.cache/uv
-ENV UV_SYSTEM_PYTHON=1
-ENV UV_BREAK_SYSTEM_PACKAGES=1
+#ENV UV_SYSTEM_PYTHON=1
+#ENV UV_BREAK_SYSTEM_PACKAGES=1
 ENV UV_LINK_MODE=copy
 
 # Install minimal runtime dependencies (NCCL, Python)
@@ -266,7 +259,8 @@ RUN apt update && apt upgrade -y \
     libcudnn9-cuda-13 \
     libnccl-dev libnccl2 libibverbs1 libibverbs-dev rdma-core \
     libxcb1 \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install uv
 
 # Set final working directory
 WORKDIR $VLLM_BASE_DIR
@@ -279,8 +273,11 @@ RUN mkdir -p tiktoken_encodings && \
 # Copy artifacts from Builder Stage
 # We copy the python packages and executables
 # No need to copy source code, as it's already in the site-packages
-COPY --from=builder /usr/local/lib/python3.12/dist-packages /usr/local/lib/python3.12/dist-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
+COPY --from=builder /workspace/python-venv /workspace/python-venv
+
+# Activate virtual environment
+ENV VIRTUAL_ENV=/workspace/python-venv
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 # Setup Env for Runtime
 ENV TORCH_CUDA_ARCH_LIST="12.0;12.1"
@@ -296,3 +293,10 @@ RUN chmod +x $VLLM_BASE_DIR/run-cluster-node.sh
 # Final extra deps
 RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     uv pip install ray[default]
+
+# Create entrypoint script to activate venv
+# RUN echo '#!/bin/bash\nsource /workspace/python-venv/bin/activate\nexec "$@"' > /entrypoint.sh && \
+#     chmod +x /entrypoint.sh
+# ENTRYPOINT ["/entrypoint.sh"]
+
+# CMD ["bash"]
