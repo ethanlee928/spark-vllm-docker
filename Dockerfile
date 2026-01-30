@@ -141,6 +141,10 @@ RUN --mount=type=cache,id=repo-cache,target=/repo-cache \
     if [ ! -d "vllm" ]; then \
         echo "Cache miss: Cloning vLLM from scratch..." && \
         git clone --recursive https://github.com/vllm-project/vllm.git; \
+        if [ "$VLLM_REF" != "main" ]; then \
+            cd vllm && \
+            git checkout ${VLLM_REF}; \
+        fi; \
     else \
         echo "Cache hit: Fetching updates..." && \
         cd vllm && \
