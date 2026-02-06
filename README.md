@@ -16,10 +16,11 @@ While it was primarily developed to support multi-node inference, it works just 
 - [4. Using `run-cluster-node.sh` (Internal)](#4-using-run-cluster-nodesh-internal)
 - [5. Configuration Details](#5-configuration-details)
 - [6. Mods and Patches](#6-mods-and-patches)
-- [7. Using cluster mode for inference](#7-using-cluster-mode-for-inference)
-- [8. Fastsafetensors](#8-fastsafetensors)
-- [9. Benchmarking](#9-benchmarking)
-- [10. Downloading Models](#10-downloading-models)
+- [7. Launch Scripts](#7-launch-scripts)
+- [8. Using cluster mode for inference](#8-using-cluster-mode-for-inference)
+- [9. Fastsafetensors](#9-fastsafetensors)
+- [10. Benchmarking](#10-benchmarking)
+- [11. Downloading Models](#11-downloading-models)
 
 ## DISCLAIMER
 
@@ -40,6 +41,23 @@ cd spark-vllm-docker
 
 Build the container.
 
+**ATTENTION!** 
+
+If you are getting the following error (or similar), you need to build the image from the source instead of using pre-built wheels. To do it, just remove `--use-wheels` parameter from the build command:
+
+```
+0.181 Using Python 3.12.3 environment at: /usr
+0.559   × No solution found when resolving dependencies:
+0.559   ╰─▶ Because only vllm==0.15.0rc2.dev49+g59bcc5b6f.cu130 is available and
+0.559       vllm==0.15.0rc2.dev49+g59bcc5b6f.cu130 has no wheels with a matching
+0.559       platform tag (e.g., `manylinux_2_39_aarch64`), we can conclude that all
+0.559       versions of vllm cannot be used.
+0.559       And because you require vllm, we can conclude that your requirements
+0.559       are unsatisfiable.
+```
+
+This error happens if vLLM nightly build fails for aarch64 platform, but succeeds for x86-64. You can check the status of vLLM nightly wheels at https://wheels.vllm.ai/nightly/cu130/vllm/
+
 **If you have only one DGX Spark:**
 
 ```bash
@@ -49,6 +67,7 @@ Build the container.
 **On DGX Spark cluster:**
 
 Make sure you connect your Sparks together and enable passwordless SSH as described in NVidia's [Connect Two Sparks Playbook](https://build.nvidia.com/spark/connect-two-sparks/stacked-sparks). 
+You can also check out our new [Networking Guide](docs/NETWORKING.md).
 
 Then run the following command that will build and distribute image across the cluster.
 
@@ -59,6 +78,19 @@ Then run the following command that will build and distribute image across the c
 ### Run
 
 **On a single node**:
+
+**NEW** - `launch-cluster.sh` now supports solo mode, which is now a recommended way to run the container on a single Spark:
+
+```bash
+./launch-cluster.sh --solo exec \
+  vllm serve \
+    QuantTrio/Qwen3-VL-30B-A3B-Instruct-AWQ \
+    --port 8000 --host 0.0.0.0 \
+    --gpu-memory-utilization 0.7 \
+    --load-format fastsafetensors
+```
+
+**To launch using regular `docker run`**
 
 ```bash
  docker run \
@@ -126,6 +158,240 @@ docker builder prune
 Don't do it every time you rebuild, because it will slow down compilation times.
 
 For periodic maintenance, I recommend using a filter: `docker builder prune --filter until=72h`
+
+### 2026-02-04
+
+#### Recipes support
+
+A major contribution from @raphaelamorim - model recipes. 
+Recipes allow to launch models with preconfigured settings with one command.
+
+Example:
+
+```bash
+# List available recipes
+./run-recipe.sh --list
+
+# Run a recipe in solo mode (single node)
+./run-recipe.sh glm-4.7-flash-awq --solo
+
+# Full setup: build container + download model + run
+./run-recipe.sh glm-4.7-flash-awq --solo --setup
+
+# Run with overrides
+./run-recipe.sh glm-4.7-flash-awq --solo --port 9000 --gpu-mem 0.8
+
+# Cluster deployment
+./run-recipe.sh glm-4.7-nvfp4 --setup
+```
+
+Please refer to the [documentation](recipes/README.md) for the details.
+
+#### Launch script option
+
+You can now specify a launch script to execute on head node instead of specifying a command directly via `exec` action. 
+Example: 
+
+```bash
+./launch-cluster.sh --launch-script examples/vllm-openai-gpt-oss-120b.sh
+```
+
+Thanks @raphaelamorim for the contribution!
+
+
+#### Ability to apply vLLM PRs during build
+
+`./build-and-copy.sh` now supports ability to apply vLLM PRs to builds. PR is applied to the most recent vLLM commit (or specific vllm-ref if set). This does NOT apply to wheels build and MXFP4 special build!
+
+To use, just specify `--apply-vllm-pr <pr_num>` in the arguments. Please note that it may fail depending on whether the PR needs a rebase for the specified vLLM reference/main branch. Use with caution!
+
+Example:
+
+```bash
+./build-and-copy.sh -t vllm-node-20260204-pr31740 --apply-vllm-pr 31740 -c
+```
+
+### 2026-02-02
+
+#### Nemotron Nano mod
+
+Added a mod for nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B support. It supports all Nemotron Nano models/quants using the same reasoning parser.
+To use, add `--apply-mod mods/nemotron-nano` to `./launch-cluster.sh` arguments.
+
+For example, to run nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4 on a single node:
+
+```bash
+./launch-cluster.sh --solo --apply-mod mods/nemotron-nano \
+  -e VLLM_USE_FLASHINFER_MOE_FP4=1 \
+  -e VLLM_FLASHINFER_MOE_BACKEND=throughput \
+  exec vllm serve nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4 \
+    --max-num-seqs 8 \
+    --tensor-parallel-size 1 \
+    --max-model-len 262144 \
+    --port 8888 --host 0.0.0.0 \
+    --trust-remote-code \
+    --enable-auto-tool-choice \
+    --tool-call-parser qwen3_coder \
+    --reasoning-parser-plugin nano_v3_reasoning_parser.py \
+    --reasoning-parser nano_v3 \
+    --kv-cache-dtype fp8 \
+    --gpu-memory-utilization 0.7 \
+    --load-format fastsafetensors 
+```
+
+Please note, that NVFP4 models on Spark are not fully supported on vLLM (any build) yet, so the performance will not be optimal. You will likely see Flashinfer errors during load. This model is also known to crash sometimes.
+
+#### Ability to use launch-cluster.sh with NVIDIA NGC containers
+
+Added a new mod that enables using cluster launch script with NVIDIA NGC vLLM or any other vLLM container that includes Infiniband libraries and Ray support.
+
+To use, add `--apply-mod mods/use-ngc-vllm` to `./launch-cluster.sh` arguments. It can be combined with other mods.
+For example, to launch Nemotron Nano in the cluster using NGC container, you can use the following command:
+
+```bash
+./launch-cluster.sh \
+   -t nvcr.io/nvidia/vllm:26.01-py3 \
+   --apply-mod mods/use-ngc-vllm \
+   --apply-mod mods/nemotron-nano \
+   -e VLLM_USE_FLASHINFER_MOE_FP4=1 \
+   -e VLLM_FLASHINFER_MOE_BACKEND=throughput \
+   exec vllm serve nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4 \
+       --max-model-len 262144 \
+       --port 8888 --host 0.0.0.0 \
+       --trust-remote-code \
+       --enable-auto-tool-choice \
+       --tool-call-parser qwen3_coder \
+       --reasoning-parser-plugin nano_v3_reasoning_parser.py \
+       --reasoning-parser nano_v3 \
+       --kv-cache-dtype fp8 \
+       --gpu-memory-utilization 0.7 \
+       --tensor-parallel-size 2 \
+       --distributed-executor-backend ray
+```
+
+Make sure you have the container pulled on both nodes!
+
+At this point it doesn't seem like NGC container performs any better for this model than a custom build.
+
+### 2026-01-29
+
+#### New Parameters for launch-cluster.sh
+
+- Added **solo mode** to `launch-cluster.sh` to launch models on a single node. Just use `--solo` flag  or if you have only a single Spark, it will default to Solo mode if no other nodes are found.
+- Added `-e` / `--env` parameter to `launch-cluster.sh` to pass environment variables to the container.
+
+#### New Mod for GLM-4.7-Flash-AWQ
+
+Added a mod to prevent severe inference speed degradation when using cyankiwi/GLM-4.7-Flash-AWQ-4bit (and potentially other AWQ quants of this model).
+See (this post on NVIDIA forums)[https://forums.developer.nvidia.com/t/make-glm-4-7-flash-go-brrrrr/359111] for implementation details.
+
+To use the mod, first build the container with Transformers 5 support (`--pre-tf`) flag, e.g.:
+
+```bash
+./build-and-copy.sh -t vllm-node-tf5 --use-wheels --pre-tf -c
+```
+
+Drop `--use-wheels` if you experience an error during build (see the annoucement in the Quick Start section).
+
+Then, to run on a single node:
+
+```bash
+./launch-cluster.sh -t vllm-node-tf5 --solo \
+  --apply-mod mods/fix-glm-4.7-flash-AWQ \
+  exec vllm serve cyankiwi/GLM-4.7-Flash-AWQ-4bit \
+  --tool-call-parser glm47 \
+  --reasoning-parser glm45 \
+  --enable-auto-tool-choice \
+  --served-model-name glm-4.7-flash \
+  --max-model-len 202752 \
+  --max-num-batched-tokens 4096 \
+  --max-num-seqs 64 \
+  --host 0.0.0.0 --port 8888 \
+  --gpu-memory-utilization 0.7
+```
+
+To run on cluster:
+
+```bash
+./launch-cluster.sh -t vllm-node-tf5 \
+  --apply-mod mods/fix-glm-4.7-flash-AWQ \
+  exec vllm serve cyankiwi/GLM-4.7-Flash-AWQ-4bit \
+  --tool-call-parser glm47 \
+  --reasoning-parser glm45 \
+  --enable-auto-tool-choice \
+  --served-model-name glm-4.7-flash \
+  --max-model-len 202752 \
+  --max-num-batched-tokens 4096 \
+  --max-num-seqs 64 \
+  --host 0.0.0.0 --port 8888 \
+  --gpu-memory-utilization 0.7 \
+  --distributed-executor-backend ray \
+  --tensor-parallel-size 2
+```
+
+**NOTE**: vLLM implementation is suboptimal even with the patch. The model performance is still significantly slower than it should be for the model with this number of active parameters. Running in the cluster increases prompt processing performance, but not token generation. You can expect ~40 t/s generation speed in both single node and cluster.
+
+#### Experimental Optimized MXFP4 Build
+
+Added an experimental build option, optimized for DGX Spark and gpt-oss models by [Christopher Owen](https://github.com/christopherowen/spark-vllm-mxfp4-docker/blob/main/Dockerfile).
+
+It is currently the fastest way to run GPT-OSS on DGX Spark, achieving 60 t/s on a single Spark.
+
+To use this build, first build the container with `--exp-mxfp4` flag. I recommend using a separate label as it is currently not recommended to use this build for models other than gpt-oss:
+
+```bash
+./build-and-copy.sh -t vllm-node-mxfp4 --exp-mxfp4 -c
+```
+
+Then, to run on a single Spark:
+
+```bash
+ docker run \
+  --privileged \
+  --gpus all \
+  -it --rm \
+  --network host --ipc=host \
+  -v  ~/.cache/huggingface:/root/.cache/huggingface \
+  vllm-node-mxfp4 \
+  bash -c -i "vllm serve openai/gpt-oss-120b \
+        --host 0.0.0.0 \
+        --port 8888 \
+        --enable-auto-tool-choice \
+        --tool-call-parser openai \
+        --reasoning-parser openai_gptoss \
+        --gpu-memory-utilization 0.70 \
+        --enable-prefix-caching \
+        --load-format fastsafetensors \
+        --quantization mxfp4 \
+        --mxfp4-backend CUTLASS \
+        --mxfp4-layers moe,qkv,o,lm_head \
+        --attention-backend FLASHINFER \
+        --kv-cache-dtype fp8 \
+        --max-num-batched-tokens 8192"
+```
+
+On a Dual Spark cluster:
+
+```bash
+./launch-cluster.sh -t vllm-node-mxfp4 exec vllm serve \
+  openai/gpt-oss-120b \
+        --host 0.0.0.0 \
+        --port 8888 \
+        --enable-auto-tool-choice \
+        --tool-call-parser openai \
+        --reasoning-parser openai_gptoss \
+        --gpu-memory-utilization 0.70 \
+        --enable-prefix-caching \
+        --load-format fastsafetensors \
+        --quantization mxfp4 \
+        --mxfp4-backend CUTLASS \
+        --mxfp4-layers moe,qkv,o,lm_head \
+        --attention-backend FLASHINFER \
+        --kv-cache-dtype fp8 \
+        --max-num-batched-tokens 8192 \
+        --distributed-executor-backend ray \
+        --tensor-parallel-size 2
+```
 
 ### 2025-12-24
 
@@ -353,6 +619,7 @@ Using a different username:
 | `--triton-ref <ref>` | Triton commit SHA, branch or tag (default: 'v3.5.1') |
 | `--vllm-ref <ref>` | vLLM commit SHA, branch or tag (default: 'main') |
 | `--pre-tf` | Install pre-release transformers (5.0.0rc or higher). Alias: `--pre-transformers`. |
+| `--exp-mxfp4` | Build with experimental native MXFP4 support. Alias: `--experimental-mxfp4`. |
 | `--use-wheels [mode]` | Use pre-built vLLM wheels. Mode: `nightly` (default) or `release`. |
 | `--pre-flashinfer` | Use pre-release versions of FlashInfer. |
 | `-c, --copy-to <host[,host...] or host host...>` | Host(s) to copy the image to after building (space- or comma-separated list after the flag). |
@@ -441,7 +708,7 @@ The script attempts to automatically detect:
 You can override the auto-detected values if needed:
 
 ```bash
-./launch-cluster.sh --nodes "10.0.0.1,10.0.0.2" --eth-if enp1s0f1np1 --ib-if rocep1s0f1
+./launch-cluster.sh --nodes "10.0.0.1,10.0.0.2" --eth-if enp1s0f1np1 --ib-if rocep1s0f1 -e MY_ENV=123
 ```
 
 | Flag | Description |
@@ -451,9 +718,12 @@ You can override the auto-detected values if needed:
 | `--name` | Container name (default: `vllm_node`). |
 | `--eth-if` | Ethernet interface name. |
 | `--ib-if` | InfiniBand interface name. |
+| `-e, --env` | Environment variable to pass to container (e.g. `-e VAR=val`). Can be used multiple times. |
 | `--apply-mod` | Apply mods/patches from specified directory. Can be used multiple times to apply multiple mods. |
 | `--nccl-debug` | NCCL debug level (e.g., INFO, WARN). Defaults to INFO if flag is present but value is omitted. |
 | `--check-config` | Check configuration and auto-detection without launching. |
+| `--solo` | Solo mode: skip autodetection, launch only on current node, do not launch Ray cluster |
+| `--launch-script` | Path to bash script to execute in the container (from examples/ directory or absolute path). If launch script is specified, action should be omitted. |
 | `-d` | Run in daemon mode (detached). |
 
 ## 3\. Running the Container (Manual)
@@ -630,7 +900,55 @@ Mods can be used for:
 - Customizing vLLM behavior for specific workloads
 - Rapid iteration on development without rebuilding the entire image
 
-## 7\. Using cluster mode for inference
+## 7\. Launch Scripts
+
+Launch scripts provide a simple way to define reusable model configurations. Instead of passing long command lines, you can create a bash script that is copied into the container and executed directly.
+
+### Basic Usage
+
+```bash
+# Use a launch script by name (looks in profiles/ directory)
+./launch-cluster.sh --launch-script example-vllm-minimax
+
+# Use with explicit nodes
+./launch-cluster.sh -n 192.168.1.1,192.168.1.2 --launch-script vllm-openai-gpt-oss-120b.sh
+
+# Combine with mods for models requiring patches
+./launch-cluster.sh --launch-script vllm-glm-4.7-nvfp4.sh --apply-mod mods/fix-Salyut1-GLM-4.7-NVFP4
+```
+
+### Script Format
+
+Launch scripts are simple bash files that run directly inside the container:
+
+```bash
+#!/bin/bash
+# PROFILE: OpenAI GPT-OSS 120B
+# DESCRIPTION: vLLM serving openai/gpt-oss-120b with FlashInfer MOE optimization
+
+# Set environment variables if needed
+export VLLM_USE_FLASHINFER_MOE_MXFP4_MXFP8=1
+
+# Run your command
+vllm serve openai/gpt-oss-120b \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --tensor-parallel-size 2 \
+    --distributed-executor-backend ray \
+    --enable-auto-tool-choice
+```
+
+### Available Launch Scripts
+
+The `examples/` directory contains ready-to-use launch scripts:
+
+- **example-vllm-minimax.sh** - MiniMax-M2-AWQ with Ray distributed backend
+- **vllm-openai-gpt-oss-120b.sh** - OpenAI GPT-OSS 120B with FlashInfer MOE
+- **vllm-glm-4.7-nvfp4.sh** - GLM-4.7-NVFP4 (requires the glm4_moe patch mod)
+
+See [examples/README.md](examples/README.md) for detailed documentation and more examples.
+
+## 8\. Using cluster mode for inference
 
 First, start follow the instructions above to start the head container on your first Spark, and node container on the second Spark.
 Then, on the first Spark, run vllm like this:
@@ -647,7 +965,7 @@ docker exec -it vllm_node
 
 And execute vllm command inside.
 
-## 8\. Fastsafetensors
+## 9\. Fastsafetensors
 
 This build includes support for fastsafetensors loading which significantly improves loading speeds, especially on DGX Spark where MMAP performance is very poor currently.
 [Fasttensors](https://github.com/foundation-model-stack/fastsafetensors/) solve this issue by using more efficient multi-threaded loading while avoiding mmap.
@@ -661,11 +979,11 @@ To use this method, simply include `--load-format fastsafetensors` when running 
 HF_HUB_OFFLINE=1 vllm serve openai/gpt-oss-120b --port 8888 --host 0.0.0.0 --trust_remote_code --swap-space 16 --gpu-memory-utilization 0.7 -tp 2 --distributed-executor-backend ray --load-format fastsafetensors
 ```
 
-## 9\. Benchmarking
+## 10\. Benchmarking
 
 I recommend using [llama-benchy](https://github.com/eugr/llama-benchy) - a new benchmarking tool that delivers results in the same format as llama-bench from llama.cpp suite.
 
-## 10\. Downloading Models
+## 11\. Downloading Models
 
 The `hf-download.sh` script provides a convenient way to download models from HuggingFace and distribute them across your cluster nodes. It uses Huggingface CLI via `uvx` for fast downloads and `rsync` for distribution across the cluster.
 
