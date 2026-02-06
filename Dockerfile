@@ -88,7 +88,7 @@ RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
 ARG PRE_TRANSFORMERS=0
 RUN --mount=type=cache,id=uv-cache,target=/root/.cache/uv \
     if [ "$PRE_TRANSFORMERS" = "1" ]; then \
-        uv pip install -U "transformers==5.0.0rc0" --pre; \
+        uv pip install -U "transformers==5.0.0" --pre; \
     fi
 # =========================================================
 # STAGE 2: Triton Builder (Compiles Triton independently)
